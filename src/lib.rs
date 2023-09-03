@@ -1,47 +1,56 @@
-
-pub mod text;
 pub mod results;
 pub mod tui;
+pub mod text;
+pub mod markov;
 
 use std::io::{
     StdinLock,
     BufReader,
     BufRead,
+    self,
 };
 use std::path::{
     PathBuf,
     Path,
 };
-use std::fs::File;
 use std::time::Instant;
-use termion::event::Key;
-use termion::input::{
-    TermRead,
-    Keys,
+use std::fs::{
+    File,
 };
-use termion::color;
 
-use crate::tui::GameTui;
-use crate::text::Text;
-use crate::results::GameResults;
+use results::GameResults;
+use termion::input::Keys;
+use termion::{color, event::Key, input::TermRead};
+use tui::{GameTui};
+use text::Text;
+use crate::markov::{
+    generate_text,
+    create_cache,
+};
+
+
+pub struct Game {
+    tui: GameTui,
+    text: Vec<Text>,
+    words: Vec<String>,
+}
+
 
 pub struct GameError {
     pub msg: String,
 }
 
-impl From<String> for GameError {
-    fn from(err: String) -> Self {
+impl From<std::io::Error> for GameError {
+    fn from(error: std::io::Error) -> Self {
         GameError {
-            msg: err,
+            msg: error.to_string(),
         }
     }
 }
 
-impl From<std::io::Error> for GameError {
-    fn from(err: std::io::Error) -> Self {
-        GameError {
-            msg: err.to_string(),
-        }
+impl From<String> for GameError {
+    fn from(error: String) -> Self {
+        GameError { msg: error }
     }
 }
 
@@ -51,36 +60,43 @@ impl std::fmt::Debug for GameError {
     }
 }
 
-pub struct Game {
-    tui: GameTui,
-    text: Vec<Text>,
-    words: Vec<String>,
-}
-
 impl<'a> Game {
-    fn lines_from_file(filename: impl AsRef<Path>) -> Vec<String> {
-        let file = File::open(filename).expect("no such file");
-        let buf = BufReader::new(file);
-        buf.lines()
-            .map(|l| l.expect("Could not parse line"))
-            .collect()
-    }
 
+
+
+    fn lines_from_file(filename: impl AsRef<Path>) -> io::Result<Vec<String>> {
+        BufReader::new(File::open(filename)?).lines().collect()
+    }
     pub fn new() -> Result<Self, GameError> {
-        let mut game = Game {
+
+        let mut toipe = Game {
             tui: GameTui::new(),
             words: Vec::new(),
             text: Vec::new(),
         };
 
-        game.restart()?;
-        Ok(game)
+        toipe.restart()?;
+
+        Ok(toipe)
     }
 
     pub fn restart(&mut self) -> Result<(), GameError> {
         self.tui.reset_screen()?;
 
-        self.words = Self::lines_from_file("./words");
+        let tokens = include_str!("./input.txt")
+            .split_whitespace()
+            .map(|x| String::from(x))
+            .collect();
+
+        let cache = create_cache(tokens);
+        self.words = generate_text(cache, 30);
+
+        self.tui.display_lines_bottom(&[&[
+            Text::from("ctrl-r").with_color(color::Blue),
+            Text::from(" to restart, ").with_faint(),
+            Text::from("ctrl-c").with_color(color::Blue),
+            Text::from(" to abort").with_faint(),
+        ]])?;
 
         self.show_words()?;
 
@@ -92,8 +108,7 @@ impl<'a> Game {
         Ok(())
     }
 
-
-    pub fn run(&mut self, stdin: StdinLock<'a>) -> Result<(bool, GameResults), GameError> {
+    pub fn test(&mut self, stdin: StdinLock<'a>) -> Result<(bool, GameResults), GameError> {
         let mut input = Vec::<char>::new();
         let original_text = self
             .text
@@ -105,34 +120,38 @@ impl<'a> Game {
         let mut num_errors = 0;
         let mut num_chars_typed = 0;
 
-        enum GameStatus {
+        enum TestStatus {
+            // last key press did not quit/restart - more keys to be entered
             NotDone,
+            // last letter was typed
             Done,
+            // user wants to quit test
             Quit,
+            // user wants to restart test
             Restart,
         }
 
-        impl GameStatus {
+        impl TestStatus {
             fn to_process_more_keys(&self) -> bool {
-                matches!(self, GameStatus::NotDone)
+                matches!(self, TestStatus::NotDone)
             }
 
             fn to_display_results(&self) -> bool {
-                matches!(self, GameStatus::Done)
+                matches!(self, TestStatus::Done)
             }
 
             fn to_restart(&self) -> bool {
-                matches!(self, GameStatus::Restart)
+                matches!(self, TestStatus::Restart)
             }
         }
 
-        let mut process_key = |key: Key| -> Result<GameStatus, GameError> {
+        let mut process_key = |key: Key| -> Result<TestStatus, GameError> {
             match key {
                 Key::Ctrl('c') => {
-                    return Ok(GameStatus::Quit);
+                    return Ok(TestStatus::Quit);
                 }
                 Key::Ctrl('r') => {
-                    return Ok(GameStatus::Restart);
+                    return Ok(TestStatus::Restart);
                 }
                 Key::Ctrl('w') => {
                     // delete last word
@@ -148,17 +167,17 @@ impl<'a> Game {
                     input.push(c);
 
                     if input.len() >= original_text.len() {
-                        return Ok(GameStatus::Done);
+                        return Ok(TestStatus::Done);
                     }
 
                     num_chars_typed += 1;
 
                     if original_text[input.len() - 1] == c {
                         self.tui
-                            .print_text_raw(&Text::from(c).with_color(color::LightGreen))?;
+                            .display_raw_text(&Text::from(c).with_color(color::LightGreen))?;
                         self.tui.move_to_next_char()?;
                     } else {
-                        self.tui.print_text_raw(
+                        self.tui.display_raw_text(
                             &Text::from(original_text[input.len() - 1])
                                 .with_underline()
                                 .with_color(color::Red),
@@ -178,7 +197,7 @@ impl<'a> Game {
 
             self.tui.flush()?;
 
-            Ok(GameStatus::NotDone)
+            Ok(TestStatus::NotDone)
         };
 
         let mut keys = stdin.keys();
@@ -242,7 +261,7 @@ impl<'a> Game {
     ) -> Result<bool, GameError> {
         self.tui.reset_screen()?;
 
-        self.tui.print_lines::<&[Text], _>(&[
+        self.tui.display_lines::<&[Text], _>(&[
             &[Text::from(format!(
                 "Took {}s for {} words",
                 results.duration().as_secs(),
@@ -262,11 +281,15 @@ impl<'a> Game {
                 Text::from(" (words per minute)"),
             ],
         ])?;
+        self.tui.display_lines_bottom(&[&[
+            Text::from("ctrl-r").with_color(color::Blue),
+            Text::from(" to restart, ").with_faint(),
+            Text::from("ctrl-c").with_color(color::Blue),
+            Text::from(" to quit ").with_faint(),
+        ]])?;
         // no cursor on results page
         self.tui.hide_cursor()?;
 
-        // TODO: make this a bit more general
-        // perhaps use a `known_keys_pressed` flag?
         let mut to_restart: Option<bool> = None;
         while to_restart.is_none() {
             match keys.next().unwrap()? {

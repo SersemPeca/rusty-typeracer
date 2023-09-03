@@ -1,4 +1,3 @@
-
 use std::{
     fmt::Display,
     io::{stdout, Stdout, Write},
@@ -12,53 +11,52 @@ use termion::{
     style, terminal_size,
 };
 
+use crate::Text;
 use crate::GameError;
-use crate::text::{
-    Text,
-    HasLength,
-};
-
-/// We will use this to format lines adequately
-#[derive(Clone, Copy)]
-struct Pos {
-    pub x: u16,
-    pub y: u16,
-    pub len: u16,
-}
-
-struct Cursor {
-    pub lines: Vec<Pos>,
-    pub curr_line: usize,
-    pub curr_char: u16,
-}
+use crate::text::HasLength;
 
 const MIN_LINE_WIDTH: usize = 50;
 
-impl Cursor {
+
+#[derive(Clone, Copy)]
+struct LinePos {
+
+    pub y: u16,
+
+    pub x: u16,
+
+    pub length: u16,
+}
+
+
+struct CursorPos {
+    pub lines: Vec<LinePos>,
+    pub cur_line: usize,
+    pub cur_char_in_line: u16,
+}
+
+impl CursorPos {
     pub fn new() -> Self {
         Self {
             lines: Vec::new(),
-            curr_line: 0,
-            curr_char: 0,
+            cur_line: 0,
+            cur_char_in_line: 0,
         }
-    }
-
-    pub fn cur_pos(&self) -> (u16, u16) {
-        let line = self.lines[self.curr_line];
-        (line.x + self.curr_char, line.y) 
     }
 
     pub fn next(&mut self) -> (u16, u16) {
-        let line = self.lines[self.curr_line];
-        let last_index = line.len - 1;
+        let line = self.lines[self.cur_line];
+        let max_chars_index = line.length - 1;
 
-        if self.curr_char < last_index {
-            self.curr_char += 1;
-        }
-        else { /// We must move one line down (If we can)
-            if self.curr_line + 1 < self.lines.len() {
-                self.curr_line += 1;
-                self.curr_char = 0;
+        if self.cur_char_in_line < max_chars_index {
+            // more chars in line
+            self.cur_char_in_line += 1;
+        } else {
+            // reached the end of line
+            if self.cur_line + 1 < self.lines.len() {
+                // more lines available
+                self.cur_line += 1;
+                self.cur_char_in_line = 0;
             }
         }
 
@@ -66,51 +64,59 @@ impl Cursor {
     }
 
     pub fn prev(&mut self) -> (u16, u16) {
-
-        if self.curr_char > 0 {
-            self.curr_char -= 1;
+        if self.cur_char_in_line > 0 {
+            // more chars behind in line
+            self.cur_char_in_line -= 1;
         } else {
-            if self.curr_line > 0 {
-                self.curr_line -= 1;
-                let line = self.lines[self.curr_line];
-
-                self.curr_char = line.len - 1;
+            // reached the start of line
+            if self.cur_line > 0 {
+                // more lines available
+                self.cur_line -= 1;
+                self.cur_char_in_line = self.lines[self.cur_line].length - 1;
             }
         }
 
         self.cur_pos()
     }
 
+    pub fn cur_pos(&self) -> (u16, u16) {
+        let line = self.lines[self.cur_line];
+        (line.x + self.cur_char_in_line, line.y)
+    }
 }
+
 
 pub struct GameTui {
     stdout: RawTerminal<Stdout>,
-    cursor: Cursor,
+    cursor_pos: CursorPos,
     track_lines: bool,
+    bottom_lines_len: usize,
 }
 
+type MaybeError<T = ()> = Result<T, GameError>;
+
 impl GameTui {
+
     pub fn new() -> Self {
         Self {
             stdout: stdout().into_raw_mode().unwrap(),
-            cursor: Cursor::new(),
+            cursor_pos: CursorPos::new(),
             track_lines: false,
+            bottom_lines_len: 0,
         }
     }
 
-    pub fn flush(&mut self) -> Result<(), GameError> {
+    pub fn reset(&mut self) {
+        self.cursor_pos = CursorPos::new();
+    }
+
+
+    pub fn flush(&mut self) -> MaybeError {
         self.stdout.flush()?;
         Ok(())
-
-    }
-    /// Resets terminal.
-    ///
-    /// Clears screen and sets the cursor to a non-blinking block.
-    pub fn reset(&mut self) {
-        self.cursor = Cursor::new();
     }
 
-    pub fn reset_screen(&mut self) -> Result<(), GameError> {
+    pub fn reset_screen(&mut self) -> MaybeError {
         let (sizex, sizey) = terminal_size()?;
 
         write!(
@@ -120,42 +126,42 @@ impl GameTui {
             cursor::Goto(sizex / 2, sizey / 2),
             cursor::BlinkingBar
             )?;
-
         self.flush()?;
 
         Ok(())
     }
 
-    fn print_line_raw<T, U>(&mut self, text: U) -> Result<(), GameError>
-        where 
-        U: AsRef<[T]>,
-    [T]: HasLength,
-    T: Display, {
-        let len = text.as_ref().length() as u16;
-        write!(self.stdout, "{}", cursor::Left(len / 2))?;
-
-
-        if self.track_lines {
-            let (x, y) = self.stdout.cursor_pos()?;
-            self.cursor.lines.push(Pos {x, y, len: len});
-        }
-
-        for t in text.as_ref() {
-            self.print_text_raw(t)?;
-        }
-        /// TODO: Change ?
-        write!(self.stdout, "{}", cursor::Left(len))?;
-        Ok(())
-    }
-
-    pub fn print_line(&mut self, text: &[Text]) -> Result<(), GameError> {
-        self.print_line_raw(text)?;
+    pub fn display_a_line(&mut self, text: &[Text]) -> MaybeError {
+        self.display_a_line_raw(text)?;
         self.flush()?;
 
         Ok(())
     }
 
-    pub fn print_lines<T, U>(&mut self, lines: &[T]) -> Result<(), GameError>
+    fn display_a_line_raw<T, U>(&mut self, text: U) -> MaybeError
+        where
+            U: AsRef<[T]>,
+        [T]: HasLength,
+        T: Display,
+        {
+            let len = text.as_ref().length() as u16;
+            write!(self.stdout, "{}", cursor::Left(len / 2),)?;
+
+            // TODO: find a better way to enable this only in certain contexts
+            if self.track_lines {
+                let (x, y) = self.stdout.cursor_pos()?;
+                self.cursor_pos.lines.push(LinePos { x, y, length: len });
+            }
+
+            for t in text.as_ref() {
+                self.display_raw_text(t)?;
+            }
+            write!(self.stdout, "{}", cursor::Left(len),)?;
+
+            Ok(())
+        }
+
+    pub fn display_lines<T, U>(&mut self, lines: &[T]) -> MaybeError
         where
         T: AsRef<[U]>,
     [U]: HasLength,
@@ -171,36 +177,38 @@ impl GameTui {
                 "{}",
                 cursor::Goto(sizex / 2, sizey / 2 + (line_no as u16) - line_offset)
                 )?;
-            self.print_line_raw(line.as_ref())?;
+            self.display_a_line_raw(line.as_ref())?;
         }
         self.flush()?;
 
         Ok(())
     }
 
-    /// TODO: Display the keys that terminate the program
-
-    pub fn print_text_raw<T>(&mut self, text: &T) -> Result<(), GameError>
+    pub fn display_lines_bottom<T, U>(&mut self, lines: &[T]) -> MaybeError
         where
-        T: Display,
-        {
-            write!(self.stdout, "{}", text)?;
-            Ok(())
+        T: AsRef<[U]>,
+    [U]: HasLength,
+    U: Display,
+    {
+        let (sizex, sizey) = terminal_size()?;
+
+        let line_offset = lines.len() as u16;
+        self.bottom_lines_len = lines.len();
+
+        for (line_no, line) in lines.iter().enumerate() {
+            write!(
+                self.stdout,
+                "{}",
+                cursor::Goto(sizex / 2, sizey - 1 + (line_no as u16) - line_offset)
+                )?;
+            self.display_a_line_raw(line.as_ref())?;
         }
-
-    pub fn hide_cursor(&mut self) ->  Result<(), GameError> {
-        write!(self.stdout, "{}", cursor::Hide)?;
         self.flush()?;
+
         Ok(())
     }
 
-    pub fn show_cursor(&mut self) -> Result<(), GameError> {
-        write!(self.stdout, "{}", cursor::Show)?;
-        self.flush()?;
-        Ok(())
-    }
-
-    pub fn display_words(&mut self, words: &[String]) -> Result<Vec<Text>, GameError> {
+    pub fn display_words(&mut self, words: &[String]) -> MaybeError<Vec<Text>> {
         self.reset();
         let mut current_len = 0;
         let mut max_word_len = 0;
@@ -210,44 +218,44 @@ impl GameTui {
         // 40% of terminal width
         let max_width = terminal_width * 2 / 5;
         const MAX_WORDS_PER_LINE: usize = 10;
-        // eprintln!("max width is {}", max_width);
-
         for word in words {
             max_word_len = std::cmp::max(max_word_len, word.len() + 1);
-            /// Characters      Whitespace
+
             let new_len = current_len + word.len() as u16 + 1;
             if line.len() < MAX_WORDS_PER_LINE && new_len <= max_width {
                 // add to line
                 line.push(word.clone());
                 current_len += word.len() as u16 + 1
             } else {
-                /// Add extra whitespace at the end of every word
+                // add an extra space at the end of each line because
+                //  user will instinctively type a space after every word
+                //  (at least I did)
                 lines.push(Text::from(line.join(" ") + " ").with_faint());
 
+                // clear line
                 line = vec![word.clone()];
                 current_len = word.len() as u16 + 1;
             }
         }
 
-        /// Logic for adding the last line
         lines.push(Text::from(line.join(" ")).with_faint());
 
         max_word_len = std::cmp::max(max_word_len + 1, MIN_LINE_WIDTH);
-        if lines.len() /*+ self.bottom_lines_len*/ + 2 > terminal_height as usize {
+        if lines.len() + self.bottom_lines_len + 2 > terminal_height as usize {
             return Err(GameError::from(format!(
-                        "Terminal height is too short! Toipe requires at least {} lines, got {} lines",
-                        lines.len() /*+ self.bottom_lines_len */+ 2,
+                        "Terminal height is too short! Game requires at least {} lines, got {} lines",
+                        lines.len() + self.bottom_lines_len + 2,
                         terminal_height,
                         )));
         } else if max_word_len > terminal_width as usize {
             return Err(GameError::from(format!(
-                        "Terminal width is too low! Toipe requires at least {} columns, got {} columns",
+                        "Terminal width is too low! Game requires at least {} columns, got {} columns",
                         max_word_len, terminal_width,
                         )));
         }
 
         self.track_lines = true;
-        self.print_lines(
+        self.display_lines(
             lines
             .iter()
             .cloned()
@@ -263,44 +271,67 @@ impl GameTui {
         Ok(lines)
     }
 
-    pub fn replace_text<T>(&mut self, text: T) -> Result<(), GameError>
+
+    pub fn display_raw_text<T>(&mut self, text: &T) -> MaybeError
+        where
+        T: Display,
+        {
+            write!(self.stdout, "{}", text)?;
+            Ok(())
+        }
+
+
+    pub fn hide_cursor(&mut self) -> MaybeError {
+        write!(self.stdout, "{}", cursor::Hide)?;
+        self.flush()?;
+        Ok(())
+    }
+
+
+    pub fn show_cursor(&mut self) -> MaybeError {
+        write!(self.stdout, "{}", cursor::Show)?;
+        self.flush()?;
+        Ok(())
+    }
+
+    pub fn replace_text<T>(&mut self, text: T) -> MaybeError
         where
         T: Display,
         {
             self.move_to_prev_char()?;
-            self.print_text_raw(&text)?;
+            self.display_raw_text(&text)?;
             self.move_to_cur_pos()?;
 
             Ok(())
         }
 
-    /// Moves the cursor to the next char
-    pub fn move_to_next_char(&mut self) -> Result<(), GameError> {
-        let (x, y) = self.cursor.next();
+
+    pub fn move_to_next_char(&mut self) -> MaybeError {
+        let (x, y) = self.cursor_pos.next();
         write!(self.stdout, "{}", cursor::Goto(x, y))?;
 
         Ok(())
     }
 
-    /// Moves the cursor to the previous char
-    pub fn move_to_prev_char(&mut self) -> Result<(), GameError> {
-        let (x, y) = self.cursor.prev();
+
+    pub fn move_to_prev_char(&mut self) -> MaybeError {
+        let (x, y) = self.cursor_pos.prev();
         write!(self.stdout, "{}", cursor::Goto(x, y))?;
 
         Ok(())
     }
 
-    /// Moves the cursor to just before the character to be typed next
-    pub fn move_to_cur_pos(&mut self) -> Result<(), GameError> {
-        let (x, y) = self.cursor.cur_pos();
+
+    pub fn move_to_cur_pos(&mut self) -> MaybeError {
+        let (x, y) = self.cursor_pos.cur_pos();
         write!(self.stdout, "{}", cursor::Goto(x, y))?;
 
         Ok(())
     }
 
-    /// Returns the current line the cursor is on
+
     pub fn current_line(&self) -> usize {
-        self.cursor.curr_line
+        self.cursor_pos.cur_line
     }
 }
 
@@ -311,9 +342,7 @@ impl Default for GameTui {
 }
 
 impl Drop for GameTui {
-    ///
-    /// TODO: print error message when terminal height/width is too small.
-    /// Take a look at https://github.com/Samyak2/toipe/pull/28#discussion_r851784291 for more info.
+
     fn drop(&mut self) {
         write!(
             self.stdout,
@@ -325,5 +354,4 @@ impl Drop for GameTui {
             .expect("Could not reset terminal while exiting");
         self.flush().expect("Could not flush stdout while exiting");
     }
-
 }

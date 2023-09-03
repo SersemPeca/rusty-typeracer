@@ -13,7 +13,6 @@ pub struct GameResults {
 }
 
 impl GameResults {
-    
     pub fn duration(&self) -> Duration {
         self.ended_at.duration_since(self.started_at)
     }
