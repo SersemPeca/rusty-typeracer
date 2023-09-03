@@ -1,5 +1,3 @@
-//! Utilities for the terminal UI of toipe.
-
 use std::{
     fmt::Display,
     io::{stdout, Stdout, Write},

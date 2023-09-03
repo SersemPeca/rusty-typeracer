@@ -108,7 +108,7 @@ impl<'a> Game {
         Ok(())
     }
 
-    pub fn test(&mut self, stdin: StdinLock<'a>) -> Result<(bool, GameResults), GameError> {
+    pub fn run(&mut self, stdin: StdinLock<'a>) -> Result<(bool, GameResults), GameError> {
         let mut input = Vec::<char>::new();
         let original_text = self
             .text

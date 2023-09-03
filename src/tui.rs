@@ -20,12 +20,19 @@ const MIN_LINE_WIDTH: usize = 50;
 
 #[derive(Clone, Copy)]
 struct LinePos {
-
     pub y: u16,
-
     pub x: u16,
-
     pub length: u16,
+}
+
+impl LinePos {
+    pub fn new() -> Self {
+        LinePos {
+            y : 0,
+            x : 0,
+            length : 1,
+        }
+    }
 }
 
 
@@ -53,6 +60,7 @@ impl CursorPos {
             self.cur_char_in_line += 1;
         } else {
             // reached the end of line
+            // Can I enforce this compile time ?
             if self.cur_line + 1 < self.lines.len() {
                 // more lines available
                 self.cur_line += 1;
@@ -85,12 +93,11 @@ impl CursorPos {
     }
 }
 
-
 pub struct GameTui {
     stdout: RawTerminal<Stdout>,
     cursor_pos: CursorPos,
-    track_lines: bool,
     bottom_lines_len: usize,
+    track_lines: bool,
 }
 
 type MaybeError<T = ()> = Result<T, GameError>;
@@ -111,6 +118,7 @@ impl GameTui {
     }
 
 
+    // Private ?
     pub fn flush(&mut self) -> MaybeError {
         self.stdout.flush()?;
         Ok(())
@@ -147,7 +155,6 @@ impl GameTui {
             let len = text.as_ref().length() as u16;
             write!(self.stdout, "{}", cursor::Left(len / 2),)?;
 
-            // TODO: find a better way to enable this only in certain contexts
             if self.track_lines {
                 let (x, y) = self.stdout.cursor_pos()?;
                 self.cursor_pos.lines.push(LinePos { x, y, length: len });
@@ -228,8 +235,6 @@ impl GameTui {
                 current_len += word.len() as u16 + 1
             } else {
                 // add an extra space at the end of each line because
-                //  user will instinctively type a space after every word
-                //  (at least I did)
                 lines.push(Text::from(line.join(" ") + " ").with_faint());
 
                 // clear line
@@ -353,5 +358,71 @@ impl Drop for GameTui {
             )
             .expect("Could not reset terminal while exiting");
         self.flush().expect("Could not flush stdout while exiting");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cursor_next_move_to_new_line() {
+        let mut cursor = CursorPos::new();
+        cursor.lines = vec!(LinePos::new(), LinePos::new(), LinePos::new(), LinePos::new());
+
+        cursor.next();
+
+        assert_eq!(cursor.cur_line, 1, "Cursor NEXT test does not work!");
+    }
+
+    #[test]
+    fn cursor_prev_previous_line() {
+        let mut cursor = CursorPos::new();
+        cursor.lines = vec!(LinePos::new(), LinePos::new(), LinePos::new(), LinePos::new());
+
+        cursor.next();
+        cursor.next();
+        cursor.prev();
+
+        assert_eq!(cursor.cur_line, 1, "Cursor PREVIOUS test does not work!");
+
+    }
+
+    #[test]
+    fn cursor_next_on_line() {
+
+        let mut cursor = CursorPos::new();
+
+        let mut linePos1 = LinePos::new();
+        linePos1.length = 3;
+
+        let mut linePos2 = LinePos::new();
+        linePos2.length = 4;
+
+        cursor.lines = vec!(linePos1, linePos2);
+
+        cursor.next();
+
+
+        assert_eq!(cursor.cur_char_in_line, 1);
+    }
+
+    #[test]
+    fn cursor_prev_on_line() {
+        
+        let mut cursor = CursorPos::new();
+
+        let mut linePos1 = LinePos::new();
+        linePos1.length = 3;
+
+        let mut linePos2 = LinePos::new();
+        linePos2.length = 4;
+
+        cursor.lines = vec!(linePos1, linePos2);
+
+        cursor.next();
+        cursor.prev();
+
+        assert_eq!(cursor.cur_char_in_line, 0);
     }
 }

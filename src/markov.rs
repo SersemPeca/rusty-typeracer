@@ -3,7 +3,6 @@ extern crate rand;
 use rand::Rng;
 use std::collections::HashMap;
 
-
 pub fn create_cache(tokens: Vec<String>) -> HashMap<String, Vec<String>> {
     let mut cache = HashMap::new();
 
@@ -43,7 +42,6 @@ pub fn generate_text(cache: HashMap<String, Vec<String>>, num_words: i32) -> Vec
     for _ in 0..num_words {
         let key = format!("{} {}", first_word, second_word);
 
-        // Here, there can be a terminal key!
         let options = match cache.get(&key) {
             Some(opt) => opt,
             None => {
@@ -61,4 +59,23 @@ pub fn generate_text(cache: HashMap<String, Vec<String>>, num_words: i32) -> Vec
     }
 
     output
+}
+
+#[cfg(test)]
+mod test {
+
+    use super::*;
+
+    #[test]
+    fn test_construct_markov() {
+        let words = vec!("one".to_string(), "two".to_string(), "three".to_string(), "one".to_string(), "two".to_string(), "four".to_string(), "five".to_string(), "".to_string(), "".to_string());
+        let markov = create_cache(words);
+
+        assert!(markov.contains_key("one two"));
+        assert!(markov.contains_key("two three"));
+        assert!(markov.contains_key("three one"));
+        assert!(markov.contains_key("two four"));
+        assert!(markov.contains_key("four five"));
+        //assert_eq!(markov.len(), 4);
+    }
 }
