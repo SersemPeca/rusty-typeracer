@@ -5,10 +5,10 @@ use std::{
 
 use termion::{
     clear,
-    color::{self, Color},
     cursor::{self, DetectCursorPos},
     raw::{IntoRawMode, RawTerminal},
-    style, terminal_size,
+    style,
+    terminal_size,
 };
 
 use crate::Text;
@@ -25,8 +25,8 @@ struct LinePos {
     pub length: u16,
 }
 
-impl LinePos {
-    pub fn new() -> Self {
+impl Default for LinePos {
+    fn default() -> Self {
         LinePos {
             y : 0,
             x : 0,
@@ -34,7 +34,6 @@ impl LinePos {
         }
     }
 }
-
 
 struct CursorPos {
     pub lines: Vec<LinePos>,
@@ -60,7 +59,6 @@ impl CursorPos {
             self.cur_char_in_line += 1;
         } else {
             // reached the end of line
-            // Can I enforce this compile time ?
             if self.cur_line + 1 < self.lines.len() {
                 // more lines available
                 self.cur_line += 1;
@@ -368,7 +366,7 @@ mod tests {
     #[test]
     fn cursor_next_move_to_new_line() {
         let mut cursor = CursorPos::new();
-        cursor.lines = vec!(LinePos::new(), LinePos::new(), LinePos::new(), LinePos::new());
+        cursor.lines = vec![LinePos::default(); 4];
 
         cursor.next();
 
@@ -378,7 +376,7 @@ mod tests {
     #[test]
     fn cursor_prev_previous_line() {
         let mut cursor = CursorPos::new();
-        cursor.lines = vec!(LinePos::new(), LinePos::new(), LinePos::new(), LinePos::new());
+        cursor.lines = vec![LinePos::default(); 4];
 
         cursor.next();
         cursor.next();
@@ -393,10 +391,10 @@ mod tests {
 
         let mut cursor = CursorPos::new();
 
-        let mut linePos1 = LinePos::new();
+        let mut linePos1 = LinePos::default();
         linePos1.length = 3;
 
-        let mut linePos2 = LinePos::new();
+        let mut linePos2 = LinePos::default();
         linePos2.length = 4;
 
         cursor.lines = vec!(linePos1, linePos2);
@@ -412,10 +410,10 @@ mod tests {
         
         let mut cursor = CursorPos::new();
 
-        let mut linePos1 = LinePos::new();
+        let mut linePos1 = LinePos::default();
         linePos1.length = 3;
 
-        let mut linePos2 = LinePos::new();
+        let mut linePos2 = LinePos::default();
         linePos2.length = 4;
 
         cursor.lines = vec!(linePos1, linePos2);

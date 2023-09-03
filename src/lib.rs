@@ -9,10 +9,7 @@ use std::io::{
     BufRead,
     self,
 };
-use std::path::{
-    PathBuf,
-    Path,
-};
+use std::path::Path;
 use std::time::Instant;
 use std::fs::{
     File,
@@ -61,23 +58,17 @@ impl std::fmt::Debug for GameError {
 }
 
 impl<'a> Game {
-
-
-
-    fn lines_from_file(filename: impl AsRef<Path>) -> io::Result<Vec<String>> {
-        BufReader::new(File::open(filename)?).lines().collect()
-    }
     pub fn new() -> Result<Self, GameError> {
 
-        let mut toipe = Game {
+        let mut game = Game {
             tui: GameTui::new(),
             words: Vec::new(),
             text: Vec::new(),
         };
 
-        toipe.restart()?;
+        game.restart()?;
 
-        Ok(toipe)
+        Ok(game)
     }
 
     pub fn restart(&mut self) -> Result<(), GameError> {
@@ -85,7 +76,7 @@ impl<'a> Game {
 
         let tokens = include_str!("./input.txt")
             .split_whitespace()
-            .map(|x| String::from(x))
+            .map(String::from)
             .collect();
 
         let cache = create_cache(tokens);
@@ -113,10 +104,13 @@ impl<'a> Game {
         let original_text = self
             .text
             .iter()
-            .fold(Vec::<char>::new(), |mut chars, text| {
+            .fold(Vec::<char>::with_capacity(1000), |mut chars, text| {
                 chars.extend(text.text().chars());
                 chars
             });
+        let original_text = self.text.iter()
+            .flat_map(|text| text.text().chars())
+            .collect::<Vec<_>>();
         let mut num_errors = 0;
         let mut num_chars_typed = 0;
 

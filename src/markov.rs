@@ -48,7 +48,12 @@ pub fn generate_text(cache: HashMap<String, Vec<String>>, num_words: i32) -> Vec
                return output
             }
         };
+
+        let Some(options) = cache.get(&key) else {
+           return output;
+        };
         
+
         let new_word_idx = rng.gen_range(0, options.len());
         let new_word = options[new_word_idx].clone();
 
